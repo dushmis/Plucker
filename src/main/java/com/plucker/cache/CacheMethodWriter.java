@@ -1,0 +1,347 @@
+package com.plucker.cache;
+
+
+import com.plucker.annotation.Cached;
+import java.io.PrintWriter;
+import java.text.MessageFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import javax.annotation.processing.ProcessingEnvironment;
+import javax.annotation.processing.RoundEnvironment;
+import javax.lang.model.element.Element;
+import javax.lang.model.element.ElementKind;
+import javax.lang.model.element.ExecutableElement;
+import javax.lang.model.element.TypeElement;
+import javax.lang.model.element.VariableElement;
+import javax.lang.model.type.TypeMirror;
+import javax.lang.model.util.ElementFilter;
+
+/**
+ *
+ */
+public class CacheMethodWriter {
+  final Pattern methodParams = Pattern.compile("\\((.*)\\)", Pattern.CASE_INSENSITIVE | Pattern.MULTILINE);
+  private final PrintWriter out;
+  private final String suffixedSimpleClassName;
+  Set<? extends TypeElement> annotations;
+  private CacheMethod[] cacheMethods;
+  private String packageName;
+  private ProcessingEnvironment processingEnvironment;
+  private RoundEnvironment roundEnv;
+  private int counter = 0;
+
+  CacheMethodWriter(PrintWriter out, String className) {
+    this.out = out;
+    int lastDot = className.lastIndexOf('.');
+    if (lastDot > 0) {
+      packageName = className.substring(0, lastDot);
+    }
+    suffixedSimpleClassName = (className.substring(lastDot + 1) + Utils.SUFFIX_CLASS_NAME);
+  }
+
+  public static List<ExecutableElement> getMethods(Element annotationElem, RoundEnvironment roundEnvironment) {
+    List<ExecutableElement> outList = new ArrayList<>();
+    String simpleName = annotationElem.getSimpleName().toString();
+    roundEnvironment.getRootElements()
+            .stream()
+            .filter(elem -> Objects.equals(elem.getSimpleName().toString(), simpleName))
+            .forEach(elem -> elem.getEnclosedElements()
+                    .stream()
+                    .filter(ExecutableElement.class::isInstance)
+                    .map(ExecutableElement.class::cast)
+                    .forEachOrdered(outList::add));
+    return outList;
+  }
+
+  public Set<? extends TypeElement> getAnnotations() {
+    return annotations;
+  }
+
+  public void setAnnotations(Set<? extends TypeElement> annotations) {
+    this.annotations = annotations;
+  }
+
+  public ProcessingEnvironment getProcessingEnvironment() {
+    return processingEnvironment;
+  }
+
+  public void setProcessingEnvironment(ProcessingEnvironment processingEnvironment) {
+    this.processingEnvironment = processingEnvironment;
+  }
+
+  public void testMethod1() {
+    Set<? extends Element> rootElements = roundEnv.getElementsAnnotatedWith(Cached.class);
+    rootElements.stream().map(o -> o.getAnnotation(Cached.class)).collect(Collectors.toSet()).forEach(System.out::println);
+    Set<Element> collect = rootElements.stream().map(Element::getEnclosingElement).collect(Collectors.toSet());
+    Consumer<VariableElement> variableElementConsumer = variableElement -> System.out.println("1field = " + variableElement);
+    ElementFilter.fieldsIn(collect).forEach(variableElementConsumer);
+    System.out.println("to process classes " + collect);
+    ElementFilter.fieldsIn(rootElements).forEach(variableElementConsumer);
+  }
+
+  public void testMethod() {
+    TypeElement next = annotations.iterator().next();
+    Set<? extends Element> elements = roundEnv.getElementsAnnotatedWith(next);
+    System.out.println("elements " + elements);
+
+    ElementFilter.methodsIn(elements).forEach(executableElement -> System.out.println("methods = " + executableElement));
+    ElementFilter.constructorsIn(elements).forEach(executableElement -> System.out.println("constructors = " + executableElement));
+    ElementFilter.typesIn(elements).forEach(typeElement -> System.out.println("typesIn = " + typeElement));
+
+    Set<VariableElement> fields = ElementFilter.fieldsIn(elements);
+    System.out.println("fields " + fields);
+    for (VariableElement field : fields) {
+      System.out.println(field);
+      TypeMirror fieldType = field.asType();
+      String fullTypeClassName = fieldType.toString();
+      System.out.println("fullTypeClassName " + fullTypeClassName);
+      // Validate fullTypeClassName
+    }
+  }
+
+  public CacheMethod[] getCacheMethods() {
+    return cacheMethods;
+  }
+
+  void setCacheMethods(CacheMethod[] cacheMethods) {
+    this.cacheMethods = cacheMethods;
+  }
+
+  void writeImports() {
+    out.println("import java.util.*;");
+  }
+
+  private void newLine() {
+    out.println();
+  }
+
+  void writePackage() {
+    if (packageName != null) {
+      out.print("package ");
+      out.print(packageName);
+      out.println(";");
+      newLine();
+    }
+  }
+
+  void writeClass() {
+    out.println("//\n" +
+            "// Source code generated by Annotation Processor\n" +
+            "// (powered by https://github.com/dushmis/AnnotationCached)\n" +
+            "//");
+    out.println("  // " + suffixedSimpleClassName);
+    out.println("public class " + suffixedSimpleClassName + " { ");
+    out.println("  private final static " + suffixedSimpleClassName + " INSTANCE = new " + suffixedSimpleClassName + "();");
+    out.println("  private boolean byPass = false;");
+    out.println();
+    out.println("  public static " + suffixedSimpleClassName + " getInstance() { INSTANCE.byPass = false; return INSTANCE; }");
+    out.println("  public static " + suffixedSimpleClassName + " getInstance(boolean byPass) { INSTANCE.byPass = byPass; return INSTANCE; }");
+    out.println();
+  }
+
+  void endClass() {
+    out.println("  //end class");
+    out.println("}");
+  }
+
+  void writeFields() {
+    Arrays.stream(cacheMethods).forEach((e) -> {
+      String returnType = e.returnType.toString();
+      if (Utils.CLASS_MAP.containsKey(returnType)) {
+        returnType = Utils.CLASS_MAP.get(returnType)[0].toString();
+      }
+
+      boolean b = isaClass(returnType);
+      String preturnType = returnType;
+      if (b) {
+        returnType = "java.lang.Object";
+      }
+
+      if (preturnType.contains(".") && preturnType.contains("<") && preturnType.contains(">")) {
+        returnType = "java.lang.Object";
+      }
+
+      out.println("  private final com.google.common.cache.LoadingCache<java.util.List<Object>, " + returnType + "> " + e.cacheFieldName + ";");
+      Cached cached = e.cached;
+      TimeUnit timeUnit = cached.durationUnit();
+      if (cached.expireAfterWrite()) {
+        out.print("  private final com.google.common.cache.CacheBuilder<Object, Object> " + e.cacheName + " = com.google.common.cache.CacheBuilder.newBuilder().maximumSize(" + cached.maximumSize() + ").expireAfterWrite(" + cached.duration() + ", " + timeUnit.getDeclaringClass().getCanonicalName() + "." + timeUnit + ").recordStats();");
+      } else {
+        out.print("  private final com.google.common.cache.CacheBuilder<Object, Object> " + e.cacheName + " = com.google.common.cache.CacheBuilder.newBuilder().maximumSize(" + cached.maximumSize() + ").expireAfterAccess(" + cached.duration() + ", " + timeUnit.getDeclaringClass().getCanonicalName() + "." + timeUnit + ").recordStats();");
+      }
+      out.println();
+    });
+  }
+
+  String getParameter() {
+    return "var" + (counter++);
+  }
+
+  void writeMethods() {
+    Arrays.stream(cacheMethods).forEach((e) -> {
+      this.counter = 0;
+//      List<String> strings = new ArrayList<>();
+      Element element = e.element;
+//      for (int i = 0; i < e.parameterTypes.size(); i++) {
+//        TypeMirror typeMirror = e.parameterTypes.get(i);
+//        strings.add("" + typeMirror.toString() + " var" + i + " ");
+//      }
+//      String collect = String.join(",", strings);
+//      System.out.println("element - " + element.getEnclosingElement());
+      if (element.getKind() == ElementKind.METHOD) {
+        TypeMirror returnType_ = ((ExecutableElement) element).getReturnType();
+
+        Matcher matcher = methodParams.matcher(element.toString());
+        if (matcher.find()) {
+          String methodName;
+          String methodParameters = matcher.group(0);
+
+          String group = methodParameters.replaceAll("[()]", "");
+          if (!group.trim().equals("")) {
+            String collect1 = Arrays.stream(group.split(",")).map(s -> s + " " + getParameter() + ", ").collect(Collectors.joining()).trim();
+            if (collect1.endsWith(",")) {
+              collect1 = collect1.substring(0, collect1.length() - 1) + " ";
+            }
+            collect1 = "( /*MPARAMS*/ " + collect1.trim() + " /*MPARAMS*/ ) ";
+            String replace = element.toString().replace(methodParameters, collect1);
+            methodName = MessageFormat.format("public {0} {1}", returnType_.toString(), replace);
+          } else {
+            String collect1 = Arrays.stream(group.split(",")).map(s -> s + " " + getParameter() + ", ").collect(Collectors.joining()).trim();
+            if (collect1.endsWith(",")) {
+              collect1 = collect1.substring(0, collect1.length() - 1) + " ";
+            }
+            collect1 = "( /*MPARAMS*/ " + collect1.trim() + " /*MPARAMS*/ ) ";
+            String replace = element.toString().replace(methodParameters, collect1);
+            methodName = MessageFormat.format("public {0} {1}", returnType_.toString(), element.toString());
+          }
+          System.out.println(methodName);
+
+          out.println();
+          out.println("  @SuppressWarnings(\"unchecked\") " + methodName + " {");
+          out.println("    java.util.List<Object> objectList = new ArrayList<>();");
+          for (int i = 0; i < e.parameterTypes.size(); i++) {
+            out.println("    objectList.add(var" + i + ");");
+          }
+          String returnType = e.returnType.toString();
+          String preturnType = returnType;
+          if (Utils.CLASS_MAP.containsKey(returnType)) {
+            returnType = Utils.CLASS_MAP.get(returnType)[0].toString();
+          }
+          boolean b = isaClass(returnType);
+          if (b) {
+            returnType = "java.lang.Object";
+          }
+          if ("void".equals(returnType)) {
+            returnType = Utils.CLASS_MAP.get("void")[0].toString();
+          }
+          out.println("    if(this.byPass) {");
+          out.println("      return (" + preturnType + ") " + e.cacheFieldName + ".getUnchecked(objectList); }");
+          out.println("    " + returnType + " objects = null;");
+          out.println("    try {");
+          out.println("      objects = (" + (preturnType) + ") " + e.cacheFieldName + ".get(objectList);");
+          out.println("    } catch (java.util.concurrent.ExecutionException e) { e.printStackTrace();");
+          out.println("      objects = (" + (preturnType) + ") " + e.cacheFieldName + ".getUnchecked(objectList);");
+          out.println("    }");
+          out.println("    return (" + (preturnType) + ") objects;");
+          out.println("  }");
+        } else {
+          try {
+            throw new Exception("What the fuck");
+          } catch (Exception ex) {
+            ex.printStackTrace();
+          }
+        }
+        // use returnType for stuff ...
+      }
+    });
+  }
+
+  void writeConstructor() {
+    out.println();
+    out.println("  @SuppressWarnings(\"unchecked\") private " + suffixedSimpleClassName + "() {");
+
+    Arrays.stream(cacheMethods).forEach((e) -> {
+      List<String> strings = new ArrayList<>();
+      List<? extends TypeMirror> parameterTypes = e.parameterTypes;
+      for (int i = 0; i < parameterTypes.size(); i++) {
+        String s = "( " + parameterTypes.get(i).toString() + " )";
+        String clazzName = isaClass(parameterTypes.get(i).toString()) ? "" : s;
+        if (clazzName.contains("<") && clazzName.contains(">")) {
+          clazzName = getClassFromGenericClass(clazzName);
+        }
+        strings.add(clazzName + "var0.get(" + i + ")");
+      }
+
+      String parameterGetters = String.join(",", strings);
+      String returnType = e.returnType.toString();
+
+      if (Utils.CLASS_MAP.containsKey(returnType)) {
+        returnType = Utils.CLASS_MAP.get(returnType)[0].toString();
+      }
+
+      String methodClassName = e.element.getEnclosingElement().toString();
+
+      boolean hasDefaultConstructor = !e.cached.staticClass();
+      boolean hasInstanceMethod = e.cached.staticClass();
+
+      String preturnType = returnType;
+      boolean b = isaClass(returnType);
+
+      if (b) {
+        returnType = "java.lang.Object";
+      }
+
+      if (preturnType.contains(".") && preturnType.contains("<") && preturnType.contains(">")) {
+        returnType = "java.lang.Object";
+      }
+
+      out.println("  " + e.cacheFieldName + " = " + e.cacheName + ".build(new com.google.common.cache.CacheLoader<java.util.List<Object>, " + returnType + ">() {");
+      out.println("    @Override public " + returnType + " load(java.util.List<Object> var0) throws Exception {");
+      out.println("      try {");
+      if (hasDefaultConstructor) {
+        out.println("        " + returnType + " v1 = new " + methodClassName + "()." + e.methodName + "(" + parameterGetters + ");");
+      } else //noinspection ConstantConditions
+        if (hasInstanceMethod) {
+          out.println("        " + returnType + " v1 = " + methodClassName + "." + e.cached.staticInitializerName() + "()." + e.methodName + "(" + parameterGetters + ");");
+        } else {
+          out.println("        " + returnType + " v1 = " + methodClassName + "." + e.methodName + "(" + parameterGetters + ");");
+        }
+      out.println("        return v1;");
+      out.println("      } catch (Throwable e) { throw new Exception(e); }");
+      out.println("    }  /* end of overloaded method */");
+      out.println("   });  /* end of anon class end of field  */");
+      out.println("  // " + e.cacheName);
+      out.println();
+    });
+  }
+
+  private String getClassFromGenericClass(String clazzString) {
+    return clazzString.replaceAll("<(.*)>", "");
+  }
+
+  private boolean isaClass(String typeName) {
+    if (typeName.contains("<") && typeName.contains(">")) {
+      return false;
+    }
+
+    return !(typeName.startsWith("class") || typeName.contains(".") || Utils.CLASS_MAP.containsKey(typeName));
+  }
+
+  void endConstructor() {
+    out.println("  //end constructor");
+    out.println("}");
+  }
+
+  public void setRoundEnvironment(RoundEnvironment roundEnv) {
+    this.roundEnv = roundEnv;
+  }
+}
+

@@ -18,9 +18,9 @@ import javax.lang.model.element.TypeElement;
 import javax.tools.JavaFileObject;
 
 /**
- *
+ * @author dushyantmistry
  */
-@SupportedAnnotationTypes({"com.dushyant.annotation.Cached"})
+@SupportedAnnotationTypes({"com.plucker.annotation.Cached"})
 @SupportedSourceVersion(SourceVersion.RELEASE_8)
 public class Preprocessor extends AbstractProcessor {
 

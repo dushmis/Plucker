@@ -1,7 +1,7 @@
-# AnnotationCached
+# Plucker
 Cache java methods with just annotation
 
-![Java CI with Maven](https://github.com/dushmis/AnnotationCached/workflows/Java%20CI%20with%20Maven/badge.svg)
+![Java CI with Maven](https://github.com/dushmis/Plucker/workflows/Java%20CI%20with%20Maven/badge.svg)
 
 annotate any method with `@Cached`
 

@@ -62,8 +62,7 @@ public class Preprocessor extends AbstractProcessor {
           int[] i = {0};
           v.forEach((element) -> {
             if (element.getModifiers().contains(Modifier.PUBLIC)) {
-              CacheMethod cacheMethod = new CacheMethod(element, i[0]++);
-              cacheMethods.add(cacheMethod);
+              cacheMethods.add(new CacheMethod(element, i[0]++));
             }
           });
           cacheMethodWriter.setCacheMethods(cacheMethods.toArray(new CacheMethod[0]));
@@ -72,8 +71,8 @@ public class Preprocessor extends AbstractProcessor {
           cacheMethodWriter.endConstructor();
           //
           cacheMethodWriter.writeMethods();
-          cacheMethodWriter.testMethod1();
-          cacheMethodWriter.testMethod();
+//          cacheMethodWriter.testMethod1();
+//          cacheMethodWriter.testMethod();
           cacheMethodWriter.endClass();
         }
       } catch (IOException e) {
